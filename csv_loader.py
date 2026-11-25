@@ -1,16 +1,43 @@
-"""Reading CSV files into flight records and error messages."""
+import csv
+import os
+from validator import validate_row, to_record
 
 
 def parse_files(paths: list[str], airports: set[str]) -> tuple[list[dict], list[str]]:
-    """Process the CSV files in the order given.
+    records = []
+    errors = []
+    seen = set()
 
-    Return (records, errors):
-      records - valid flight records, in input order
-      errors  - one message per invalid row, in input order, formatted as
-                "<file name>:<line number>: <ERROR_CODE> | <free text>"
-                (base file name only, no timestamp or level, no newline)
+    for path in paths:
+        name = os.path.basename(path)
 
-    Also performs the DUPLICATE_FLIGHT check across all the files.
-    Does not write any files and does not log anything itself.
-    """
-    raise NotImplementedError
+        with open(path, "r", encoding="utf-8", newline="") as file:
+            for line_number, line in enumerate(file, start=1):
+                if line_number == 1:
+                    continue
+
+                original = line.rstrip("\r\n")
+                stripped = original.strip()
+
+                if stripped == "" or stripped.startswith("#"):
+                    continue
+
+                fields = next(csv.reader([original]))
+                error = validate_row(fields, airports)
+
+                if error is not None:
+                    errors.append(f"{name}:{line_number}: {error} | {original}")
+                    continue
+
+                record = to_record(fields)
+                key = (record["flight_id"], record["departure_datetime"])
+
+                if key in seen:
+                    errors.append(
+                        f"{name}:{line_number}: DUPLICATE_FLIGHT | {original}"
+                    )
+                else:
+                    seen.add(key)
+                    records.append(record)
+
+    return records, errors
